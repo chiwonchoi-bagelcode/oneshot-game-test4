@@ -1,0 +1,1510 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#0e0f1a">
+<meta name="color-scheme" content="dark">
+<title>손가락 복사기</title>
+<style>
+  :root { --s: 1; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: #0e0f1a;
+    color: #f2f1f7;
+    font-family: system-ui, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", "Segoe UI", sans-serif;
+    overflow: hidden;
+    overscroll-behavior: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+  }
+  [hidden] { display: none !important; }
+  #wrap {
+    position: fixed;
+    inset: 0;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  #fit { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+  #stage {
+    position: relative;
+    width: 360px;
+    height: 640px;
+    background: #151726;
+    overflow: hidden;
+    box-shadow: 0 0 0 1px #262a44, 0 20px 60px rgba(0, 0, 0, .5);
+  }
+  #cv { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+
+  /* 상단: 방 번호·목표·유령 상태 (논리 y 0..92) */
+  #hud {
+    position: absolute; left: 0; right: 0; top: 0;
+    height: calc(var(--s) * 92px);
+    padding: calc(var(--s) * 8px) calc(var(--s) * 14px) 0;
+    display: flex; flex-direction: column; gap: calc(var(--s) * 4px);
+    pointer-events: none;
+  }
+  #hud .row { display: flex; justify-content: space-between; align-items: center; font-size: calc(var(--s) * 12.5px); }
+  .tag {
+    padding: calc(var(--s) * 2px) calc(var(--s) * 9px);
+    border-radius: 999px; background: #272b45; color: #f2f1f7; font-weight: 800;
+  }
+  .tag.done { background: #1d3a2c; color: #5ee38f; }
+  #goal { font-size: calc(var(--s) * 14.5px); font-weight: 800; line-height: 1.25; }
+  #ghostLine { display: flex; align-items: center; gap: calc(var(--s) * 7px); font-size: calc(var(--s) * 13px); font-weight: 700; color: #7ee8ff; line-height: 1.25; }
+  .gdot { flex: none; width: calc(var(--s) * 13px); height: calc(var(--s) * 13px); border: calc(var(--s) * 2px) dashed #7ee8ff; border-radius: 50%; }
+  #ghostLine.none { color: #a3a7c2; }
+  #ghostLine.none .gdot { border-color: #6b7193; }
+  #ghostLine.blocked { color: #ff8a95; }
+  #ghostLine.blocked .gdot { border-color: #ff5d6c; }
+
+  /* 하단 버튼 (논리 y 560..640, 실제 터치 높이 최소 44px) */
+  #bar {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    height: max(60px, calc(var(--s) * 80px));
+    padding: 0 calc(var(--s) * 14px) max(8px, calc(var(--s) * 12px));
+    display: flex; gap: calc(var(--s) * 10px); align-items: flex-end; justify-content: center;
+    z-index: 3;
+  }
+  button.big {
+    flex: 1 1 0;
+    max-width: calc(var(--s) * 200px);
+    min-width: 44px;
+    min-height: 44px;
+    height: max(44px, calc(var(--s) * 54px));
+    padding: 0 calc(var(--s) * 12px);
+    border: 0;
+    border-radius: max(10px, calc(var(--s) * 14px));
+    font: inherit;
+    font-size: max(15px, calc(var(--s) * 17px));
+    font-weight: 800;
+    color: #1a1406;
+    background: #ffd166;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  button.big.sec { background: #2b3050; color: #f2f1f7; box-shadow: inset 0 0 0 2px #444b78; }
+  button.big:active { transform: translateY(1px); filter: brightness(.95); }
+  button.big:focus-visible { outline: 3px solid #7ee8ff; outline-offset: 2px; }
+
+  /* 성공 안내 (게임 영역 위쪽, 블록 상태는 가리지 않음) */
+  #panel {
+    position: absolute;
+    left: calc(var(--s) * 12px); right: calc(var(--s) * 12px); top: calc(var(--s) * 98px);
+    padding: calc(var(--s) * 12px) calc(var(--s) * 14px);
+    border-radius: calc(var(--s) * 16px);
+    background: #12281e;
+    box-shadow: inset 0 0 0 calc(var(--s) * 2px) #5ee38f, 0 10px 30px rgba(0, 0, 0, .45);
+    text-align: center;
+    pointer-events: none;
+    z-index: 2;
+  }
+  #panel h2 { margin: 0 0 calc(var(--s) * 4px); font-size: calc(var(--s) * 22px); color: #5ee38f; }
+  #panel p { margin: 0; font-size: calc(var(--s) * 13.5px); line-height: 1.4; color: #e6f7ec; }
+
+  /* 일시정지 안내 */
+  #pause {
+    position: absolute; inset: 0; z-index: 6;
+    display: flex; align-items: center; justify-content: center;
+    padding: calc(var(--s) * 20px);
+    background: rgba(8, 9, 16, .86);
+  }
+  #pause .box {
+    width: 100%;
+    padding: calc(var(--s) * 20px);
+    border-radius: calc(var(--s) * 18px);
+    background: #20243a;
+    box-shadow: inset 0 0 0 2px #444b78;
+    text-align: center;
+  }
+  #pause h2 { margin: 0 0 calc(var(--s) * 8px); font-size: calc(var(--s) * 22px); }
+  #pause p { margin: 0 0 calc(var(--s) * 8px); font-size: calc(var(--s) * 14px); line-height: 1.45; color: #d4d6e6; }
+  #pauseGhost { color: #7ee8ff !important; font-weight: 700; }
+  #pause button.big { max-width: none; width: 100%; margin-top: calc(var(--s) * 8px); }
+
+  /* 가로 회전 안내: 게임은 잘리지 않게 축소하고 옆 여백에 안내 */
+  #rotate {
+    position: fixed; left: 10px; top: 10px; z-index: 10;
+    display: none;
+    max-width: min(260px, calc(50vw - 28.2vh - 20px));
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: #2b3050;
+    color: #f2f1f7;
+    font-size: 14px; line-height: 1.35; font-weight: 700;
+    box-shadow: inset 0 0 0 2px #ffb547;
+    pointer-events: none;
+  }
+  @media (orientation: landscape) and (max-height: 560px) { #rotate { display: block; } }
+
+  #selftest {
+    position: fixed; right: 8px; bottom: 8px; z-index: 10;
+    padding: 6px 10px; border-radius: 8px;
+    font: 12px/1.3 ui-monospace, Menlo, Consolas, monospace;
+    background: #20243a; color: #a3a7c2; box-shadow: inset 0 0 0 1px #444b78;
+    pointer-events: none;
+  }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="fit">
+    <div id="stage">
+      <canvas id="cv" aria-label="게임 영역: 블록을 드래그하세요"></canvas>
+      <header id="hud">
+        <div class="row">
+          <span class="tag" id="roomTag">방 1 / 2</span>
+          <span class="tag" id="clearTag">완료 0 / 2</span>
+        </div>
+        <div id="goal">두 블록을 잡은 채 위 발판에 동시에 1초</div>
+        <div id="ghostLine" class="none"><span class="gdot"></span><span id="ghostText">유령 손: 없음</span></div>
+      </header>
+      <section id="panel" hidden aria-live="polite">
+        <h2 id="panelTitle">방 1 해결!</h2>
+        <p id="panelText"></p>
+      </section>
+      <nav id="bar">
+        <button class="big sec" id="btnRestart" type="button">다시 하기</button>
+        <button class="big" id="btnNext" type="button" hidden>다음 방 →</button>
+      </nav>
+      <section id="pause" hidden role="dialog" aria-modal="true" aria-labelledby="pauseTitle">
+        <div class="box">
+          <h2 id="pauseTitle">일시정지</h2>
+          <p>화면이 가려져서 게임을 멈췄어요. 그동안 블록·유령·성공 시간은 흐르지 않았어요.</p>
+          <p id="pauseNote"></p>
+          <p id="pauseGhost"></p>
+          <button class="big" id="btnResume" type="button">계속하기</button>
+        </div>
+      </section>
+      <div id="live" class="sr" aria-live="polite"></div>
+    </div>
+  </div>
+</div>
+<div id="rotate">세로 화면용 게임이에요. 휴대폰을 세로로 돌리면 더 크게 보여요.</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ===================================================================
+  // 고정 수치 (기획서의 초기값 그대로)
+  // ===================================================================
+  const CFG = Object.freeze({
+    W: 360, H: 640,               // 논리 화면
+    SIM_HZ: 60, DT: 1 / 60,       // 고정 시뮬레이션 간격
+    REC_EVERY_STEPS: 2,           // 60Hz 갱신 중 2칸마다 기록 = 30Hz
+    END_HOLD: 3,                  // 기록 끝·순방향 끝 유지(초)
+    OVERLAP_STEPS: 60,            // 연속 성공 유지 1초 = 60칸
+    RETURN_SPEED: 1.2,            // 비소유 블록 복귀 u/초
+    MIN_TRAVEL: 4,                // 유효 기록의 경로 범위 하한(논리 px)
+    MIN_REC_STEPS: 2,             // 1/30초
+    MAX_REC_STEPS: 1800,          // 30초 (후보 저장 안전 한계)
+    MAX_SAMPLES: 902,             // 시작·끝 포함 표본 상한
+    BLOCK_R: 28,                  // 블록 지름 56
+    TOUCH_R: 38,                  // 터치 영역 76
+    MIN_CSS_TOUCH: 44,            // 실제 CSS 터치 최소 크기
+    MAX_FRAME: 0.25,              // 한 번에 따라잡는 최대 실시간(초). 그 이상은 버린다.
+  });
+  const IDS = ['A', 'B'];
+  const EPS = 1e-6;
+
+  // 방 배치: 기획서 좌표 그대로. need = 활성 조건 u 하한.
+  const ROOMS = {
+    1: {
+      rails: {
+        A: { x0: 100, y0: 500, x1: 100, y1: 320 },
+        B: { x0: 260, y0: 500, x1: 260, y1: 320 },
+      },
+      need: { A: 0.90, B: 0.90 },
+      gate: null,
+    },
+    2: {
+      rails: {
+        A: { x0: 80, y0: 500, x1: 80, y1: 300 },
+        B: { x0: 150, y0: 410, x1: 310, y1: 410 },
+      },
+      need: { A: 0.90, B: 0.95 },
+      gate: { block: 'B', x: 238, leftMax: 210, rightMin: 266 }, // B 반지름 28
+    },
+  };
+
+  const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+  function posOf(rail, u) {
+    return { x: rail.x0 + (rail.x1 - rail.x0) * u, y: rail.y0 + (rail.y1 - rail.y0) * u };
+  }
+  function railLen(rail) { return Math.hypot(rail.x1 - rail.x0, rail.y1 - rail.y0); }
+  function project(rail, x, y) {
+    const dx = rail.x1 - rail.x0, dy = rail.y1 - rail.y0;
+    return clamp01(((x - rail.x0) * dx + (y - rail.y0) * dy) / (dx * dx + dy * dy));
+  }
+
+  // ===================================================================
+  // 게임 핵심 (DOM 없음: 셸과 자가검사가 함께 사용)
+  // ===================================================================
+  function createCore() {
+    const S = {};
+    let msgSeq = 0, ghostSerial = 0;
+
+    function freshBlock(id) { return { id, u: 0, owner: 'none', gateStuck: false }; }
+    function resetRoom() {
+      S.scene = 'playing';             // playing | success | complete
+      S.paused = false;
+      S.pauseNote = '';
+      S.blocks = { A: freshBlock('A'), B: freshBlock('B') };
+      S.ghost = null;                  // 하나뿐인 유령 기록
+      S.cand = null;                   // 하나뿐인 녹화 후보
+      S.pointer = null;                // 하나뿐인 실제 포인터
+      S.overlapSteps = 0;
+      S.steps = 0;
+      S.acc = 0;
+      S.gate = { open: false, pending: false };
+      S.msg = null;
+    }
+    S.room = 1;
+    S.completed = new Set();
+    S.clock = 0;
+    resetRoom();
+
+    const room = () => ROOMS[S.room];
+    const rail = (id) => room().rails[id];
+    const blockPos = (id) => posOf(rail(id), S.blocks[id].u);
+
+    const keepNote = () => (S.ghost ? ' · 기존 유령 유지' : '');
+    function say(text, kind, prio) {
+      kind = kind || 'info';
+      prio = prio || 1;
+      if (S.msg && S.msg.prio > prio && S.clock - S.msg.at < 90) return;
+      S.msg = { text, kind, prio, at: S.clock, seq: ++msgSeq };
+    }
+
+    function isActive(id) {
+      const b = S.blocks[id];
+      return b.owner !== 'none' && b.u >= room().need[id] - 1e-9;
+    }
+
+    // ---- 문(방 2) ----
+    function gateSide(u) {
+      const G = room().gate;
+      const x = posOf(rail(G.block), u).x;
+      if (x <= G.leftMax + EPS) return 'L';
+      if (x >= G.rightMin - EPS) return 'R';
+      return 'Z'; // 문 구간과 겹침
+    }
+    function gateSideOf(id) { return room().gate ? gateSide(S.blocks[id].u) : null; }
+    function uAtX(x) { const r = rail(room().gate.block); return (x - r.x0) / (r.x1 - r.x0); }
+    function passes(side, u) {
+      const G = room().gate, x = posOf(rail(G.block), u).x;
+      return side === 'L' ? x <= G.leftMax + 1e-9 : side === 'R' ? x >= G.rightMin - 1e-9 : true;
+    }
+    function clampToSide(side, u) {
+      const G = room().gate;
+      if (passes(side, u)) return u;
+      return side === 'L' ? uAtX(G.leftMax) : uAtX(G.rightMin);
+    }
+
+    // ---- 유령 재생 시계 ----
+    function pathAt(g, t) {
+      const s = g.samples;
+      if (t <= 0) return s[0].u;
+      if (t >= g.D) return s[s.length - 1].u;
+      let lo = 0, hi = s.length - 1;
+      while (hi - lo > 1) { const m = (lo + hi) >> 1; if (s[m].t <= t) lo = m; else hi = m; }
+      const a = s[lo], b = s[hi];
+      return a.u + (b.u - a.u) * ((t - a.t) / (b.t - a.t));
+    }
+    // 끝 유지 3초 → 역방향 D → 순방향 D → 끝 유지 3초 → ...
+    function ghostSample(g, gt) {
+      const H = CFG.END_HOLD, D = g.D;
+      if (gt < H) return { phase: 'hold', u: g.endU, remain: H - gt };
+      const cyc = 2 * D + H;
+      const tau = (gt - H) % cyc;
+      if (tau < D) return { phase: 'reverse', u: pathAt(g, D - tau), remain: D - tau };
+      if (tau < 2 * D) return { phase: 'forward', u: pathAt(g, tau - D), remain: 2 * D - tau };
+      return { phase: 'hold', u: g.endU, remain: cyc - tau };
+    }
+    function ghostInfo() {
+      const g = S.ghost;
+      if (!g) return null;
+      const s = ghostSample(g, g.gt);
+      return { block: g.block, phase: s.phase, remain: s.remain, blocked: g.blocked, D: g.D };
+    }
+
+    // ---- 다음 위치 제안: 수동 투영 / 유령 보간 / 비소유 복귀 ----
+    function proposeManual(b) {
+      const p = S.pointer;
+      return project(rail(b.id), p.tx + p.offX, p.ty + p.offY);
+    }
+    function moveFree(b) {
+      const g = S.ghost;
+      b.gateStuck = false;
+      if (b.owner === 'manual' && S.pointer && S.pointer.block === b.id) {
+        b.u = proposeManual(b);
+      } else if (b.owner === 'ghost' && g && g.block === b.id) {
+        g.gt += CFG.DT;
+        g.blocked = false;
+        b.u = ghostSample(g, g.gt).u;
+      } else {
+        b.owner = 'none';
+        b.u = Math.max(0, b.u - CFG.RETURN_SPEED * CFG.DT);
+      }
+    }
+
+    // 문 열림 요구·닫힘 보류 검사 (A 위치를 적용한 뒤, B 이동 전)
+    function updateGate() {
+      const B = S.blocks[room().gate.block];
+      const side = gateSide(B.u);
+      const before = S.gate.open ? (S.gate.pending ? 'pending' : 'open') : 'closed';
+      if (isActive('A')) {
+        S.gate.open = true;
+        S.gate.pending = false;
+      } else if (side === 'Z') {
+        // 닫혀야 하지만 B가 문 구간과 겹친다 → 밀어내지 않고 닫힘 보류
+        S.gate.open = true;
+        S.gate.pending = true;
+      } else {
+        S.gate.open = false;
+        S.gate.pending = false;
+      }
+      const after = S.gate.open ? (S.gate.pending ? 'pending' : 'open') : 'closed';
+      if (before !== after) {
+        if (after === 'open') say(before === 'pending' ? 'A 스위치가 다시 켜져 닫힘 대기를 취소했어요' : 'A 스위치 켜짐 · 문이 열렸어요', 'ok');
+        else if (after === 'pending') say('A 스위치가 꺼졌지만 B가 문에 걸쳐 있어 닫힘 대기', 'warn');
+        else say('A 스위치가 꺼져 문이 닫혔어요', 'warn');
+      }
+    }
+
+    function moveGated(b) {
+      const g = S.ghost;
+      const prevSide = gateSide(b.u);
+      const isManual = b.owner === 'manual' && S.pointer && S.pointer.block === b.id;
+      const isGhost = !isManual && b.owner === 'ghost' && g && g.block === b.id;
+      if (!isManual && !isGhost) b.owner = 'none';
+      const prop = isManual ? proposeManual(b)
+        : isGhost ? ghostSample(g, g.gt + CFG.DT).u
+        : Math.max(0, b.u - CFG.RETURN_SPEED * CFG.DT);
+
+      if (!S.gate.open && !passes(prevSide, prop)) {
+        // 닫힌 문은 수동·유령·복귀 모두의 횡단을 막는다
+        b.gateStuck = true;
+        if (isGhost) {
+          // 유령은 문에 닿는 지점까지만 진행하고 위치와 경로 시각을 함께 멈춘다
+          let lo = g.gt, hi = g.gt + CFG.DT;
+          for (let i = 0; i < 24; i++) {
+            const mid = (lo + hi) / 2;
+            if (passes(prevSide, ghostSample(g, mid).u)) lo = mid; else hi = mid;
+          }
+          if (lo - g.gt > 1e-6) g.gt = lo;
+          g.blocked = true;
+          b.u = ghostSample(g, g.gt).u;
+        } else {
+          b.u = clampToSide(prevSide, prop);
+          if (isManual) say('문이 닫혀 있어요 · A를 스위치까지 올려 잡아야 열려요', 'bad');
+        }
+        return;
+      }
+      b.gateStuck = false;
+      b.u = prop;
+      if (isGhost) { g.gt += CFG.DT; g.blocked = false; }
+      if (S.gate.pending && gateSide(b.u) !== 'Z') {
+        // B가 문 구간을 완전히 빠져나가면 미뤄 둔 닫힘을 적용
+        S.gate.open = false;
+        S.gate.pending = false;
+        say('B가 문을 빠져나가 문이 닫혔어요', 'warn');
+      }
+    }
+
+    function recordCandidate() {
+      const c = S.cand;
+      if (!c) return;
+      c.steps++;
+      if (c.steps <= CFG.MAX_REC_STEPS) {
+        if (c.steps % CFG.REC_EVERY_STEPS === 0 && c.samples.length < CFG.MAX_SAMPLES - 1) {
+          c.samples.push({ t: c.steps / CFG.SIM_HZ, u: S.blocks[c.block].u });
+        }
+      } else if (!c.over) {
+        c.over = true;
+        say('녹화 한계 30초를 넘었어요 · 놓아도 기록하지 않아요 (조작은 계속 가능)', 'warn', 2);
+      }
+    }
+
+    function succeed() {
+      S.completed.add(S.room);
+      S.scene = (S.room === 2 && S.completed.has(1) && S.completed.has(2)) ? 'complete' : 'success';
+      S.cand = null;      // 성공 뒤 녹화 잠금
+      S.pointer = null;   // 성공 뒤 pointerup은 기록을 바꾸지 않는다
+      S.acc = 0;
+    }
+
+    // 고정 1/60초 한 칸
+    function step() {
+      if (S.paused || S.scene !== 'playing') return;
+      S.steps++;
+      S.clock++;
+      const R = room();
+      for (const id of IDS) {
+        const b = S.blocks[id];
+        if (R.gate && R.gate.block === id) { updateGate(); moveGated(b); }
+        else moveFree(b);
+      }
+      recordCandidate();
+      const g = S.ghost;
+      if (g) {
+        const cyc = 2 * g.D + CFG.END_HOLD;
+        if (g.gt >= CFG.END_HOLD + cyc) g.gt -= cyc; // 같은 위상 유지, 수치 누적 방지
+      }
+      if (isActive('A') && isActive('B')) S.overlapSteps++;
+      else S.overlapSteps = 0;
+      if (S.overlapSteps >= CFG.OVERLAP_STEPS) succeed();
+    }
+
+    // 실시간 경과를 고정 칸으로 진행 (입력 처리 전에 항상 호출)
+    function elapse(sec) {
+      if (S.paused || S.scene !== 'playing') { S.acc = 0; return 0; }
+      sec = Math.min(Math.max(sec, 0), CFG.MAX_FRAME);
+      S.acc += sec;
+      let n = 0;
+      while (S.acc >= CFG.DT - 1e-9) {
+        S.acc -= CFG.DT;
+        step();
+        n++;
+        if (S.paused || S.scene !== 'playing') { S.acc = 0; break; }
+      }
+      return n;
+    }
+
+    // ---- 입력 ----
+    function down(pid, x, y, opt) {
+      if (S.paused || S.scene !== 'playing') return 'locked';
+      if (S.pointer) { say('손가락 하나로만 조작해요 · 추가 손가락은 무시', 'info', 0); return 'extra'; }
+      const hitR = Math.max(CFG.TOUCH_R, (opt && opt.hitR) || 0);
+      let best = null, bestD = Infinity, ghostHit = false;
+      for (const id of IDS) {
+        const b = S.blocks[id], p = blockPos(id);
+        const d = Math.hypot(x - p.x, y - p.y);
+        if (d > hitR) continue;
+        if (b.owner === 'ghost') { ghostHit = true; continue; }
+        if (d < bestD) { best = b; bestD = d; }
+      }
+      if (!best) {
+        if (ghostHit) { say('유령이 잡은 블록은 직접 잡을 수 없어요', 'warn', 2); return 'ghost'; }
+        return 'miss';
+      }
+      const p = blockPos(best.id);
+      best.owner = 'manual';
+      S.pointer = { id: pid, block: best.id, offX: p.x - x, offY: p.y - y, tx: x, ty: y };
+      S.cand = { block: best.id, steps: 0, samples: [{ t: 0, u: best.u }], over: false };
+      return 'grab';
+    }
+    function move(pid, x, y) {
+      const p = S.pointer;
+      if (!p || p.id !== pid) return false;
+      p.tx = x; p.ty = y;
+      return true;
+    }
+    function releaseManual(blockId) {
+      const b = S.blocks[blockId];
+      if (b.owner === 'manual') b.owner = 'none';
+    }
+    function up(pid) {
+      const p = S.pointer;
+      if (!p || p.id !== pid) return 'ignored';
+      S.pointer = null;
+      const c = S.cand;
+      S.cand = null;
+      if (S.paused || S.scene !== 'playing') return 'locked';
+      const b = S.blocks[p.block];
+      if (!c) { releaseManual(p.block); return 'ignored'; }
+
+      if (c.over || c.steps > CFG.MAX_REC_STEPS) {
+        releaseManual(p.block);
+        say('30초가 넘은 동작은 기록하지 않아요' + keepNote(), 'warn', 2);
+        return 'invalid:over';
+      }
+      const D = c.steps / CFG.SIM_HZ;
+      const samples = c.samples.slice();
+      const last = samples[samples.length - 1];
+      if (last.t < D - 1e-9) samples.push({ t: D, u: b.u }); else last.u = b.u;
+      let minU = Infinity, maxU = -Infinity;
+      for (const s of samples) { if (s.u < minU) minU = s.u; if (s.u > maxU) maxU = s.u; }
+      const travel = (maxU - minU) * railLen(rail(p.block));
+      if (c.steps < CFG.MIN_REC_STEPS || travel < CFG.MIN_TRAVEL - 1e-9) {
+        releaseManual(p.block);
+        say((travel < 0.5 ? '멈춘 탭은 기록하지 않아요' : '너무 짧은 동작이라 기록하지 않았어요') + keepNote(), 'warn', 2);
+        return 'invalid:short';
+      }
+      // 원자적 교체: 이전 유령 소유 해제 → 새 기록 블록을 현재 끝 위치에서 유령 소유로
+      const prev = S.ghost;
+      if (prev) S.blocks[prev.block].owner = 'none';
+      b.owner = 'ghost';
+      S.ghost = { block: p.block, samples, D, gt: 0, blocked: false, endU: b.u, minU, maxU, serial: ++ghostSerial };
+      say(prev
+        ? `교체! 이제 유령이 ${p.block}를 잡고, 놓인 ${prev.block}는 돌아가요`
+        : `유령이 ${p.block} 동작을 맡았어요 · 끝에서 3초 유지`, 'ghost', 2);
+      return 'recorded';
+    }
+    function cancel(pid) {
+      const p = S.pointer;
+      if (!p || p.id !== pid) return 'ignored';
+      S.pointer = null;
+      S.cand = null;
+      if (S.scene !== 'playing') return 'locked';
+      releaseManual(p.block);
+      say('터치가 취소되어 녹화를 버렸어요' + keepNote(), 'warn', 2);
+      return 'cancelled';
+    }
+    // 화면 숨김: 후보 취소 + 전체 일시정지
+    function hide() {
+      let cancelled = false;
+      if (S.pointer) {
+        if (S.scene === 'playing') releaseManual(S.pointer.block);
+        S.pointer = null;
+        cancelled = true;
+      }
+      if (S.cand) { S.cand = null; cancelled = true; }
+      S.acc = 0;
+      if (S.scene === 'playing' && !S.paused) {
+        S.paused = true;
+        S.pauseNote = cancelled ? '진행 중이던 드래그는 기록하지 않고 취소했어요.' : '';
+        return true;
+      }
+      return false;
+    }
+    function resume() {
+      if (!S.paused) return false;
+      S.paused = false;
+      S.acc = 0;
+      return true;
+    }
+    function restart() {
+      if (S.scene === 'complete') { S.completed.clear(); S.room = 1; }
+      resetRoom();
+    }
+    function advance() {
+      if (S.scene !== 'success' || S.room !== 1) return false;
+      S.room = 2;
+      resetRoom();
+      return true;
+    }
+    // 자가검사 전용: 특정 방을 빈 상태로 연다 (UI에 연결하지 않음)
+    function debugJumpRoom(n) { S.room = n; resetRoom(); }
+
+    return {
+      state: S, step, elapse, down, move, up, cancel, hide, resume, restart, advance,
+      isActive, ghostSample, ghostInfo, gateSideOf, blockPos, debugJumpRoom,
+      cleared: () => S.completed.size,
+    };
+  }
+
+  // ===================================================================
+  // 자가검사 (콘솔: FingerCopier.selfTest()) — 플레이 화면에는 경로를 보이지 않는다
+  // ===================================================================
+  function selfTest(options) {
+    const quiet = options && options.quiet;
+    const lines = [];
+    let pass = 0, fail = 0, invBad = [];
+    function ok(name, cond, detail) {
+      cond = !!cond;
+      if (cond) pass++; else fail++;
+      lines.push((cond ? 'PASS ' : 'FAIL ') + name + (!cond && detail !== undefined ? ' :: ' + JSON.stringify(detail) : ''));
+      if (!cond && typeof console !== 'undefined') console.assert(false, name, detail === undefined ? '' : detail);
+    }
+    const near = (a, b, e) => Math.abs(a - b) <= (e === undefined ? 1e-6 : e);
+
+    function mk(roomNo) {
+      const c = createCore();
+      if (roomNo === 2) c.debugJumpRoom(2);
+      const raw = c.step;
+      c.after = null;
+      c.step = function () {
+        const S = c.state;
+        const before = S.room === 2 ? c.gateSideOf('B') : null;
+        raw();
+        const owners = IDS.map((id) => S.blocks[id].owner);
+        const nm = owners.filter((o) => o === 'manual').length;
+        const ng = owners.filter((o) => o === 'ghost').length;
+        const bad = (why) => { if (invBad.length < 20) invBad.push(why); };
+        if (nm > 1 || ng > 1) bad('소유 수 초과');
+        if (!S.ghost && ng) bad('기록 없는 유령 소유');
+        if (S.ghost && S.scene === 'playing' && S.blocks[S.ghost.block].owner !== 'ghost') bad('소유 없는 기록');
+        if (S.ghost && S.ghost.samples.length > CFG.MAX_SAMPLES) bad('기록 표본 초과');
+        if (S.cand && S.cand.samples.length > CFG.MAX_SAMPLES) bad('후보 표본 초과');
+        IDS.forEach((id) => { const u = S.blocks[id].u; if (!(u >= 0 && u <= 1)) bad('u 범위'); });
+        if (S.scene === 'playing' && S.overlapSteps > 0 && !(c.isActive('A') && c.isActive('B'))) bad('비활성 겹침 누적');
+        if (S.room === 2) {
+          const after = c.gateSideOf('B');
+          if (!S.gate.open && after === 'Z') bad('닫힌 문과 B 겹침');
+          if (before !== 'Z' && after !== 'Z' && before !== after && !S.gate.open) bad('닫힌 문 횡단');
+        }
+        if (c.after) c.after();
+      };
+      return c;
+    }
+    function run(c, n) { for (let i = 0; i < n; i++) c.step(); }
+    function runUntil(c, pred, max) { let i = 0; while (!pred() && i < max) { c.step(); i++; } return pred(); }
+    function press(c, id, pid) { const p = c.blockPos(id); return c.down(pid || 1, p.x, p.y); }
+    function drag(c, id, u1, n, pid) {
+      pid = pid || 1;
+      const S = c.state, r = ROOMS[S.room].rails[id], P = S.pointer;
+      const u0 = project(r, P.tx + P.offX, P.ty + P.offY);
+      for (let i = 1; i <= n; i++) {
+        const q = posOf(r, u0 + (u1 - u0) * i / n);
+        c.move(pid, q.x - P.offX, q.y - P.offY);
+        c.step();
+      }
+    }
+    function recordFull(c, id, n) { press(c, id); drag(c, id, 1, n || 60); return c.up(1); }
+    function fresh(S) {
+      return S.scene === 'playing' && !S.paused && !S.ghost && !S.cand && !S.pointer && S.overlapSteps === 0 &&
+        IDS.every((id) => S.blocks[id].u === 0 && S.blocks[id].owner === 'none') && !S.gate.open && !S.gate.pending;
+    }
+    function solveRoom1(c) { recordFull(c, 'A', 60); run(c, 6); press(c, 'B'); drag(c, 'B', 1, 60); runUntil(c, () => c.state.scene !== 'playing', 200); }
+    function solveRoom2(c) { recordFull(c, 'A', 60); run(c, 6); press(c, 'B'); drag(c, 'B', 1, 48); runUntil(c, () => c.state.scene !== 'playing', 200); }
+    const bx = (c) => c.blockPos('B').x;
+
+    // ---- no-passive-shortcut ----
+    {
+      const c = mk(1), S = c.state;
+      ok('초기 상태: 방1·완료0·u=0·소유 none·기록 없음', S.room === 1 && c.cleared() === 0 && fresh(S));
+      ok('터치 영역(지름 76) 안에서 잡기', c.down(1, 130, 520) === 'grab'); // 중심에서 36px
+      c.move(1, 135, 430); c.step(); // 오프셋(-30,-20) 유지 → 목표 (105,410) → u=0.5
+      ok('시작 오프셋 유지·홈 투영', near(S.blocks.A.u, 0.5), S.blocks.A.u);
+      c.move(1, 999, -999); c.step();
+      ok('투영 상한 u=1', S.blocks.A.u === 1);
+      c.move(1, -999, 999); c.step();
+      ok('투영 하한 u=0', S.blocks.A.u === 0);
+      c.cancel(1);
+      ok('터치 영역 밖은 무시', c.down(1, 140, 500) === 'miss' && !S.pointer);
+      press(c, 'A'); drag(c, 'A', 1, 30);
+      ok('직접 잡은 A는 끝에서 활성', c.isActive('A'));
+      c.cancel(1);
+      ok('놓은 직후 A는 끝이어도 비활성', S.blocks.A.u === 1 && S.blocks.A.owner === 'none' && !c.isActive('A'));
+      run(c, 30);
+      ok('비소유 블록 복귀 1.2u/초', near(S.blocks.A.u, 1 - 1.2 * 0.5, 1e-9), S.blocks.A.u);
+      let maxOverlap = 0;
+      c.after = () => { maxOverlap = Math.max(maxOverlap, S.overlapSteps); };
+      press(c, 'B'); drag(c, 'B', 1, 20); run(c, 120);
+      c.after = null;
+      ok('유령 없는 순차 배치는 겹침 0', maxOverlap === 0 && S.scene === 'playing' && !c.isActive('A'));
+      c.cancel(1);
+      S.blocks.A.u = 1; S.blocks.B.u = 1; c.step();
+      ok('소유 없는 블록은 끝 근처여도 발판 비활성', !c.isActive('A') && !c.isActive('B') && S.overlapSteps === 0);
+      // 무작위 입력(놓기 대신 항상 취소 → 유령 없음): 성공 불가
+      const z = mk(1);
+      let seed = 7, wins = 0, overl = 0;
+      const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+      for (let i = 0; i < 4000; i++) {
+        const r = rnd();
+        if (r < 0.05) { const id = rnd() < 0.5 ? 'A' : 'B'; press(z, id); }
+        else if (r < 0.08) z.cancel(1);
+        else if (z.state.pointer && r < 0.6) { const q = posOf(ROOMS[1].rails[z.state.pointer.block], rnd()); z.move(1, q.x - z.state.pointer.offX, q.y - z.state.pointer.offY); }
+        z.step();
+        overl = Math.max(overl, z.state.overlapSteps);
+        if (z.state.scene !== 'playing') wins++;
+      }
+      ok('무작위 순차 조작(유령 없음) 4000칸: 겹침·성공 0', overl === 0 && wins === 0 && !z.state.ghost);
+    }
+
+    // ---- first-room-witness ----
+    {
+      const c = mk(1), S = c.state;
+      ok('A 1초 드래그 정상 종료 → 기록', recordFull(c, 'A', 60) === 'recorded');
+      const g = S.ghost, base = S.steps;
+      ok('유령이 A 끝 위치를 소유', g && g.block === 'A' && S.blocks.A.owner === 'ghost' && g.gt === 0 && S.blocks.A.u === 1);
+      ok('기록 D=1초·30Hz 표본 31개', near(g.D, 1) && g.samples.length === 31, { D: g.D, n: g.samples.length });
+      let held = true;
+      c.after = () => { if (S.scene === 'playing' && !(S.blocks.A.owner === 'ghost' && S.blocks.A.u === 1)) held = false; };
+      run(c, 6);
+      ok('t=0.1에 B 잡기', press(c, 'B') === 'grab');
+      drag(c, 'B', 1, 60);
+      runUntil(c, () => S.scene !== 'playing', 200);
+      c.after = null;
+      const t = (S.steps - base) / 60;
+      ok('늦어도 t=2.1에 방1 성공', S.scene === 'success' && t <= 2.1 + 1e-9, t);
+      ok('성공까지 유령 A가 끝을 계속 유지(<3초)', held && t < 3);
+      ok('완료 집합 {1}', c.cleared() === 1 && S.completed.has(1));
+    }
+    {
+      // 끝3초 → 역방향 D → 순방향 D → 끝3초, 중간 멈춤 보존
+      const c = mk(1), S = c.state;
+      press(c, 'A'); drag(c, 'A', 0.5, 30); run(c, 30); drag(c, 'A', 1, 30);
+      ok('중간 멈춤 포함 드래그 기록', c.up(1) === 'recorded');
+      const g = S.ghost, at = (t) => c.ghostSample(g, t).u;
+      ok('D=1.5초 보존', near(g.D, 1.5), g.D);
+      ok('표본은 실제 적용 위치(시작 0, 끝 1)', g.samples[0].u === 0 && g.samples[g.samples.length - 1].u === 1 && g.samples.every((s, i) => i === 0 || s.t > g.samples[i - 1].t));
+      ok('처음 3초 끝 유지', at(0) === 1 && at(1.5) === 1 && at(2.99) === 1);
+      ok('역방향 재생', near(at(3.25), 0.75) && near(at(4.25), 0.25));
+      ok('역방향에서도 멈춤 시간 보존', near(at(3.6), 0.5) && near(at(3.9), 0.5));
+      ok('역방향 끝 = 기록 시작점', near(at(4.5 - 1e-9), 0, 1e-6));
+      ok('순방향 재생', near(at(4.75), 0.25) && near(at(5.25), 0.5) && near(at(5.75), 0.75));
+      ok('순방향 끝에서 다시 3초 유지', at(6.01) === 1 && at(8.99) === 1);
+      ok('반복', near(at(9.25), 0.75) && near(at(15.25), 0.75));
+      let maxJump = 0, prev = S.blocks.A.u, minU = 1;
+      c.after = () => { const u = S.blocks.A.u; maxJump = Math.max(maxJump, Math.abs(u - prev)); prev = u; minU = Math.min(minU, u); };
+      run(c, 60 * 13);
+      c.after = null;
+      ok('실제 재생에 순간 이동 없음', maxJump <= 1 / 60 + 1e-6, maxJump);
+      ok('실제 재생이 시작점까지 되돌아감', minU <= 1e-9, minU);
+      ok('0초 루프 없음', g.D >= 1 / 30 && S.ghost === g);
+    }
+
+    // ---- atomic-one-ghost ----
+    {
+      const c = mk(1), S = c.state;
+      recordFull(c, 'A', 60);
+      const s0 = S.ghost.serial;
+      ok('유령이 잡은 블록은 직접 잡을 수 없음', press(c, 'A') === 'ghost' && !S.pointer && S.blocks.A.owner === 'ghost');
+      ok('다른 블록 B 잡기', press(c, 'B', 1) === 'grab');
+      ok('추가 손가락 무시', press(c, 'A', 2) === 'extra' && c.down(3, 10, 10) === 'extra' && S.pointer.id === 1);
+      drag(c, 'B', 0.6, 30);
+      ok('드래그 중 기존 유령 유지·재생', S.ghost.serial === s0 && S.blocks.A.owner === 'ghost' && S.ghost.gt > 0 && S.cand && S.cand.block === 'B');
+      ok('추가 손가락 떼기 무시', c.up(2) === 'ignored' && S.pointer && S.cand);
+      ok('정상 종료 → 원자적 교체', c.up(1) === 'recorded' && S.ghost.block === 'B' && S.ghost.serial !== s0 &&
+        S.blocks.B.owner === 'ghost' && S.blocks.A.owner === 'none' && !S.cand && !S.pointer);
+      ok('새 유령은 현재 끝 위치에서 시작', near(S.blocks.B.u, 0.6) && S.ghost.gt === 0 && near(S.ghost.endU, 0.6));
+      const a0 = S.blocks.A.u;
+      run(c, 10);
+      ok('이전 유령이 놓은 A는 스프링 복귀', near(S.blocks.A.u, a0 - 1.2 * 10 / 60, 1e-9), S.blocks.A.u);
+      ok('새 유령 B는 끝 유지', near(S.blocks.B.u, 0.6));
+    }
+
+    // ---- invalid-keeps-prior-record ----
+    {
+      const c = mk(1), S = c.state;
+      recordFull(c, 'A', 60);
+      const g0 = S.ghost;
+      const same = () => S.ghost === g0 && S.blocks.A.owner === 'ghost';
+      press(c, 'B'); run(c, 3);
+      ok('정지 탭: 무효·기존 기록 유지', c.up(1) === 'invalid:short' && same() && S.blocks.B.owner === 'none' && !S.cand && !S.pointer);
+      press(c, 'B'); drag(c, 'B', 3 / 180, 6);
+      ok('이동 범위 4px 미만: 무효', c.up(1) === 'invalid:short' && same());
+      run(c, 30);
+      press(c, 'B'); drag(c, 'B', 0.2, 1);
+      ok('지속 1/30초 미만: 무효', c.up(1) === 'invalid:short' && same());
+      run(c, 30);
+      press(c, 'B'); drag(c, 'B', 0.5, 20);
+      ok('pointercancel: 기록 유지·수동만 해제', c.cancel(1) === 'cancelled' && same() && S.blocks.B.owner === 'none' && !S.cand && !S.pointer);
+      run(c, 60);
+      press(c, 'B'); drag(c, 'B', 0.5, 30); run(c, CFG.MAX_REC_STEPS - 30);
+      ok('30초 정각까지 표본 ≤ 902', S.cand.samples.length <= CFG.MAX_SAMPLES && !S.cand.over, S.cand.samples.length);
+      const n30 = S.cand.samples.length;
+      run(c, 120);
+      ok('30초 이후 표본 추가 중단', S.cand.samples.length === n30 && S.cand.over);
+      drag(c, 'B', 0.3, 10);
+      ok('한계 이후에도 수동 조작 가능', near(S.blocks.B.u, 0.3));
+      ok('30초 초과 종료: 무효·기존 기록 유지', c.up(1) === 'invalid:over' && same() && S.blocks.B.owner === 'none');
+      ok('전체 시간 제한 실패 없음', S.scene === 'playing');
+      const b = mk(1);
+      press(b, 'B'); drag(b, 'B', 4 / 180, 2);
+      ok('경계: 4px·1/30초는 유효', b.up(1) === 'recorded' && near(b.state.ghost.D, 1 / 30));
+      const e = mk(1);
+      press(e, 'B'); drag(e, 'B', 0.5, 30); run(e, CFG.MAX_REC_STEPS - 30);
+      ok('경계: 정확히 30초는 유효·표본 ≤ 902', e.up(1) === 'recorded' && e.state.ghost.samples.length <= CFG.MAX_SAMPLES && near(e.state.ghost.D, 30), e.state.ghost && e.state.ghost.samples.length);
+    }
+
+    // ---- second-room-and-gate ----
+    {
+      const c = mk(2), S = c.state;
+      ok('방2 시작: 문 닫힘', S.room === 2 && fresh(S));
+      press(c, 'B'); drag(c, 'B', 1, 20);
+      ok('닫힌 문 왼쪽: B 중심 x ≤ 210', near(bx(c), 210, 1e-6), bx(c));
+      ok('문 막힘 이유 표시', S.msg && /문이 닫혀/.test(S.msg.text));
+      c.cancel(1); run(c, 60);
+      ok('A 1초 드래그 → 유령 유지', recordFull(c, 'A', 60) === 'recorded' && S.gate.open && c.isActive('A'));
+      const base = S.steps;
+      run(c, 6); press(c, 'B'); drag(c, 'B', 1, 48);
+      runUntil(c, () => S.scene !== 'playing', 200);
+      const t = (S.steps - base) / 60;
+      ok('늦어도 t=1.9에 방2 성공', S.scene !== 'playing' && S.completed.has(2) && t <= 1.9 + 1e-9, t);
+    }
+    {
+      const c = mk(2), S = c.state;
+      recordFull(c, 'A', 60);
+      press(c, 'B'); drag(c, 'B', 0.9, 40);
+      ok('B 동작 기록(A 유령 해제)', c.up(1) === 'recorded' && S.ghost.block === 'B' && S.blocks.A.owner === 'none');
+      run(c, 10);
+      ok('A 복귀로 문 닫힘, B는 오른쪽', !S.gate.open && c.gateSideOf('B') === 'R');
+      ok('유령 B가 되감다 문에 막힘', runUntil(c, () => S.ghost.blocked, 400) && near(bx(c), 266, 1e-3), bx(c));
+      const gt0 = S.ghost.gt, u0 = S.blocks.B.u;
+      run(c, 90);
+      ok('막힌 유령: 위치와 경로 시각 함께 정지', S.ghost.gt === gt0 && S.blocks.B.u === u0 && S.ghost.blocked);
+      let firstDelta = null, gtPrev = S.ghost.gt, openAt = null;
+      c.after = () => {
+        if (firstDelta === null && S.ghost.gt !== gtPrev) { firstDelta = S.ghost.gt - gtPrev; openAt = S.gate.open; }
+        gtPrev = S.ghost.gt;
+      };
+      press(c, 'A'); drag(c, 'A', 1, 30); run(c, 5);
+      c.after = null;
+      ok('문이 열리면 같은 지점부터 재개(시간 몰아치기 없음)', firstDelta !== null && firstDelta > 0 && firstDelta <= CFG.DT + 1e-9 && openAt, firstDelta);
+      ok('재개 뒤 유령 B가 문을 지나 되감음', runUntil(c, () => bx(c) < 238, 120));
+    }
+    {
+      const c = mk(2), S = c.state;
+      recordFull(c, 'A', 60);
+      press(c, 'B'); drag(c, 'B', 0.9, 40); c.up(1);
+      run(c, 10);
+      press(c, 'A'); drag(c, 'A', 0.3, 20);
+      ok('A 짧은 기록으로 교체(스위치 미도달)', c.up(1) === 'recorded' && S.ghost.block === 'A' && S.blocks.B.owner === 'none');
+      run(c, 90);
+      ok('비소유 B 복귀도 닫힌 문에 막힘(x=266)', near(bx(c), 266, 1e-6) && S.blocks.B.gateStuck && !S.gate.open, bx(c));
+      press(c, 'B'); drag(c, 'B', 0, 20);
+      ok('닫힌 문 오른쪽: B 중심 x ≥ 266', near(bx(c), 266, 1e-6), bx(c));
+    }
+
+    // ---- gate-deferral-not-a-win ----
+    {
+      const c = mk(2), S = c.state;
+      recordFull(c, 'A', 60);
+      press(c, 'B'); drag(c, 'B', (238 - 150) / 160, 20);
+      ok('B가 문 구간과 겹침(문 열림)', c.gateSideOf('B') === 'Z' && S.gate.open);
+      const uB = S.blocks.B.u;
+      let overlapWhileOff = 0;
+      c.after = () => { if (!c.isActive('A')) overlapWhileOff = Math.max(overlapWhileOff, S.overlapSteps); };
+      ok('A 비활성 + 겹침 → 닫힘 보류', runUntil(c, () => !c.isActive('A'), 400) && S.gate.open && S.gate.pending);
+      ok('보류 중 B를 밀거나 옮기지 않음', S.blocks.B.u === uB);
+      ok('A 재활성 → 보류 취소', runUntil(c, () => c.isActive('A'), 400) && S.gate.open && !S.gate.pending);
+      ok('다시 꺼지면 보류', runUntil(c, () => !c.isActive('A'), 600) && S.gate.pending && S.blocks.B.u === uB);
+      drag(c, 'B', (200 - 150) / 160, 10);
+      ok('B가 왼쪽으로 완전히 빠지면 닫힘', !S.gate.open && !S.gate.pending && c.gateSideOf('B') === 'L');
+      drag(c, 'B', 1, 10);
+      ok('닫힌 뒤 왼쪽 B는 x ≤ 210', near(bx(c), 210, 1e-6));
+      ok('A가 다시 켜져 문 열림', runUntil(c, () => c.isActive('A'), 600) && S.gate.open && !S.gate.pending);
+      drag(c, 'B', (238 - 150) / 160, 10);
+      ok('세 번째 보류', runUntil(c, () => !c.isActive('A'), 600) && S.gate.pending);
+      drag(c, 'B', 1, 10);
+      ok('보류로 목표까지 통과 → 빠져나가 닫힘', !S.gate.open && c.gateSideOf('B') === 'R' && S.blocks.B.u === 1);
+      runUntil(c, () => c.isActive('A') || S.scene !== 'playing', 120);
+      c.after = null;
+      ok('보류 열림·B 목표라도 A 비활성이면 누적 0', overlapWhileOff === 0 && S.scene === 'playing');
+    }
+
+    // ---- pause-retry-terminal-order ----
+    {
+      const c = mk(1), S = c.state;
+      recordFull(c, 'A', 60); run(c, 30);
+      press(c, 'B'); drag(c, 'B', 0.5, 20);
+      const gt0 = S.ghost.gt, uA = S.blocks.A.u, uB = S.blocks.B.u, ser = S.ghost.serial;
+      ok('화면 숨김 → 후보 취소·일시정지·기록 유지', c.hide() && S.paused && !S.cand && !S.pointer && S.blocks.B.owner === 'none' && S.ghost.serial === ser);
+      run(c, 120); c.elapse(5); c.elapse(0.2);
+      ok('일시정지 중 물리·유령·성공 시간 정지', S.ghost.gt === gt0 && S.blocks.A.u === uA && S.blocks.B.u === uB);
+      c.move(1, 0, 0);
+      ok('이전 포인터는 복원되지 않음', c.up(1) === 'ignored' && !S.pointer);
+      ok('일시정지 중 새 입력 잠금', press(c, 'B') === 'locked');
+      ok('계속하기 → 같은 유령 시각', c.resume() && !S.paused && S.ghost.gt === gt0 && !S.pointer);
+      c.step();
+      ok('재개 후 한 칸만 진행', near(S.ghost.gt, gt0 + CFG.DT, 1e-12) && S.blocks.B.u < uB);
+      const g1 = S.ghost.gt;
+      c.elapse(10);
+      ok('큰 시간 건너뛰기 없음(최대 0.25초)', S.ghost.gt <= g1 + CFG.MAX_FRAME + 1e-9, S.ghost.gt - g1);
+    }
+    {
+      const c = mk(1), S = c.state;
+      recordFull(c, 'A', 60); press(c, 'B'); drag(c, 'B', 1, 40);
+      ok('성공 1칸 전', runUntil(c, () => S.overlapSteps === CFG.OVERLAP_STEPS - 1, 120) && S.scene === 'playing');
+      const ser = S.ghost.serial;
+      c.elapse(CFG.DT);               // 셸 순서: 이벤트 시각까지 진행 →
+      const r = c.up(1);              // → 그 다음 입력 처리
+      ok('이벤트 시각까지의 성공을 먼저 확정', S.scene === 'success' && c.cleared() === 1);
+      ok('성공 뒤 pointerup은 기록 교체 안 함', r !== 'recorded' && S.ghost.serial === ser && S.ghost.block === 'A');
+      const st = S.steps;
+      run(c, 30); c.elapse(1);
+      ok('성공 판정 1회·이후 시간 정지', S.steps === st && c.cleared() === 1);
+      ok('성공 뒤 조작 잠금', press(c, 'A') === 'locked');
+      ok('방1 성공 화면에서 다음 방 외 진행 없음', S.scene === 'success');
+      c.restart();
+      ok('현재 방 다시 하기: 방1 초기화·완료 유지', S.room === 1 && fresh(S) && c.cleared() === 1);
+      solveRoom1(c);
+      c.advance();
+      ok('다음 방: 블록·문·유령·기록·후보·포인터·겹침 초기화', S.room === 2 && fresh(S) && c.cleared() === 1);
+      recordFull(c, 'A', 60); press(c, 'B'); drag(c, 'B', 0.3, 10);
+      c.restart();
+      ok('진행 중 재시작: 현재 방2만 초기화', S.room === 2 && fresh(S) && c.cleared() === 1);
+    }
+
+    // ---- distinct-room-completion ----
+    {
+      const c = mk(1), S = c.state;
+      ok('진행 중 다음 방 버튼은 무시', c.advance() === false && S.room === 1);
+      solveRoom1(c);
+      ok('첫 방 성공: {1}', S.scene === 'success' && c.cleared() === 1);
+      c.restart(); solveRoom1(c);
+      ok('첫 방 재성공: 성공 화면이지만 완료 수 1 유지', S.scene === 'success' && c.cleared() === 1 && S.room === 1);
+      ok('재성공 뒤에도 다음 방 가능', c.advance() && S.room === 2);
+      solveRoom2(c);
+      ok('둘째 방 성공: {1,2}·전체 완료', S.scene === 'complete' && c.cleared() === 2);
+      ok('전체 완료 뒤 다음 방 없음', c.advance() === false);
+      c.restart();
+      ok('처음부터 다시 하기: 방1·완료 0', S.room === 1 && c.cleared() === 0 && fresh(S));
+      const d = mk(2); solveRoom2(d);
+      ok('방1 미완료 상태의 방2 성공은 전체 완료 아님', d.state.scene === 'success' && d.cleared() === 1);
+    }
+
+    ok('모든 시험 동안 불변식 유지(소유 수·문 횡단·표본 상한·겹침)', invBad.length === 0, invBad);
+
+    const summary = `손가락 복사기 자가검사: ${pass}/${pass + fail} 통과` + (fail ? ` (${fail} 실패)` : '');
+    if (!quiet && typeof console !== 'undefined') {
+      console.log(lines.join('\n'));
+      console.log(summary);
+    }
+    return { pass, fail, lines, summary };
+  }
+
+  // ===================================================================
+  // 브라우저 셸: 입력·렌더링
+  // ===================================================================
+  const FONT = 'system-ui, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif';
+  const COL = {
+    bg: '#151726', band: '#1a1d30', grid: 'rgba(255,255,255,0.035)',
+    panel: '#20243a', edge: '#30355a', ink: '#f2f1f7', muted: '#a3a7c2', dim: '#6b7193',
+    groove: '#21263d', grooveEdge: '#383f63',
+    A: '#9d7bff', B: '#ff6fa8',
+    hand: '#ffd166', handInk: '#4a3300', ghost: '#7ee8ff', rec: '#ffa24c',
+    ok: '#5ee38f', warn: '#ffb547', bad: '#ff5d6c',
+  };
+
+  function startShell() {
+    const core = createCore();
+    const $ = (id) => document.getElementById(id);
+    const fit = $('fit'), stage = $('stage'), cv = $('cv'), ctx = cv.getContext('2d');
+    const el = {
+      roomTag: $('roomTag'), clearTag: $('clearTag'), goal: $('goal'), ghostLine: $('ghostLine'), ghostText: $('ghostText'),
+      panel: $('panel'), panelTitle: $('panelTitle'), panelText: $('panelText'),
+      pause: $('pause'), pauseNote: $('pauseNote'), pauseGhost: $('pauseGhost'),
+      restart: $('btnRestart'), next: $('btnNext'), resume: $('btnResume'), live: $('live'),
+    };
+    let scale = 1, dpr = 1;
+
+    function layout() {
+      const r = fit.getBoundingClientRect();
+      scale = Math.max(0.2, Math.min(r.width / CFG.W, r.height / CFG.H));
+      stage.style.width = (CFG.W * scale) + 'px';
+      stage.style.height = (CFG.H * scale) + 'px';
+      stage.style.setProperty('--s', scale.toFixed(4));
+      dpr = Math.min(3, window.devicePixelRatio || 1);
+      cv.width = Math.round(CFG.W * scale * dpr);
+      cv.height = Math.round(CFG.H * scale * dpr);
+    }
+    layout();
+    window.addEventListener('resize', layout);
+    window.addEventListener('orientationchange', () => setTimeout(layout, 120));
+
+    // ---- 실시간 → 고정 칸 ----
+    let last = performance.now();
+    function pump() {
+      const now = performance.now();
+      const sec = (now - last) / 1000;
+      last = now;
+      core.elapse(sec);
+    }
+
+    // ---- 입력: 첫 포인터 하나만 ----
+    function toLogical(e) {
+      const r = cv.getBoundingClientRect();
+      return { x: (e.clientX - r.left) * CFG.W / r.width, y: (e.clientY - r.top) * CFG.H / r.height };
+    }
+    cv.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      e.preventDefault();
+      pump();
+      const p = toLogical(e);
+      // 화면이 작아도 실제 터치 영역이 44 CSS px 이상이 되도록 넓힌다
+      const r = core.down(e.pointerId, p.x, p.y, { hitR: (CFG.MIN_CSS_TOUCH / 2 + 2) / scale });
+      if (r === 'grab') { try { cv.setPointerCapture(e.pointerId); } catch (_) { /* 무시 */ } }
+    });
+    cv.addEventListener('pointermove', (e) => {
+      const ptr = core.state.pointer;
+      if (!ptr || ptr.id !== e.pointerId) return;
+      pump();
+      const p = toLogical(e);
+      core.move(e.pointerId, p.x, p.y);
+    });
+    cv.addEventListener('pointerup', (e) => { pump(); core.up(e.pointerId); });
+    cv.addEventListener('pointercancel', (e) => { pump(); core.cancel(e.pointerId); });
+    cv.addEventListener('lostpointercapture', (e) => {
+      const ptr = core.state.pointer;
+      if (ptr && ptr.id === e.pointerId) { pump(); core.cancel(e.pointerId); }
+    });
+    cv.addEventListener('contextmenu', (e) => e.preventDefault());
+    function onHide() { pump(); core.hide(); }
+    document.addEventListener('visibilitychange', () => { if (document.hidden) onHide(); });
+    window.addEventListener('pagehide', onHide);
+
+    el.restart.addEventListener('click', () => { pump(); core.restart(); last = performance.now(); });
+    el.next.addEventListener('click', () => { pump(); core.advance(); last = performance.now(); });
+    el.resume.addEventListener('click', () => { core.resume(); last = performance.now(); });
+
+    // ---- 그리기 도구 ----
+    function rr(x, y, w, h, r) {
+      r = Math.min(r, w / 2, h / 2);
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+    }
+    function setFont(size, weight) { ctx.font = `${weight || 700} ${size}px ${FONT}`; }
+    function fitFont(text, maxW, size, weight) {
+      let s = size;
+      setFont(s, weight);
+      while (s > 8 && ctx.measureText(text).width > maxW) { s -= 0.5; setFont(s, weight); }
+      return s;
+    }
+    // anchor: 'center'(cx가 가운데) | 'start'(cx가 왼쪽 끝) | 'end'(cx가 오른쪽 끝)
+    function pill(cx, cy, text, o) {
+      const size = fitFont(text, (o.maxW || 336) - 20, o.size || 13, 800);
+      const w = Math.min(o.maxW || 336, ctx.measureText(text).width + 20), h = size + 11;
+      let x = o.anchor === 'start' ? cx : o.anchor === 'end' ? cx - w : cx - w / 2;
+      x = Math.max(4, Math.min(CFG.W - 4 - w, x));
+      rr(x, cy - h / 2, w, h, h / 2);
+      ctx.fillStyle = o.bg; ctx.fill();
+      if (o.edge) { ctx.lineWidth = 1.5; ctx.strokeStyle = o.edge; ctx.stroke(); }
+      ctx.fillStyle = o.color; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(text, x + w / 2, cy + 0.5);
+    }
+    function line(a, b) { ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); }
+    function railInfo(r) {
+      const dx = r.x1 - r.x0, dy = r.y1 - r.y0, L = Math.hypot(dx, dy);
+      const dir = { x: dx / L, y: dy / L };
+      const horizontal = Math.abs(dx) > Math.abs(dy);
+      const n = horizontal ? { x: 0, y: -1 } : { x: 1, y: 0 }; // 경로·라벨을 비켜 그릴 방향
+      return { dir, n, L };
+    }
+    const add = (p, v, k) => ({ x: p.x + v.x * k, y: p.y + v.y * k });
+
+    // 아래를 가리키는 손 (손끝이 원점). filled: 실제 손, 아니면 유령 테두리 손
+    function drawHand(x, y, mode, alpha) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(0.95, 0.95);
+      ctx.globalAlpha = alpha === undefined ? 1 : alpha;
+      ctx.beginPath();
+      ctx.moveTo(-4.5, -3);
+      ctx.quadraticCurveTo(-4.5, 2, 0, 2);
+      ctx.quadraticCurveTo(4.5, 2, 4.5, -3);
+      ctx.lineTo(4.5, -17);
+      ctx.quadraticCurveTo(7, -14.5, 9.5, -17);
+      ctx.quadraticCurveTo(12.5, -14.5, 14, -19);
+      ctx.quadraticCurveTo(17.5, -18, 17, -23);
+      ctx.lineTo(16, -35);
+      ctx.lineTo(13, -41);
+      ctx.lineTo(-9, -41);
+      ctx.lineTo(-11.5, -33);
+      ctx.lineTo(-17.5, -26);
+      ctx.quadraticCurveTo(-19.5, -20.5, -14, -20);
+      ctx.lineTo(-4.5, -23);
+      ctx.closePath();
+      if (mode === 'manual') {
+        ctx.fillStyle = COL.hand; ctx.fill();
+        ctx.lineWidth = 2.2; ctx.strokeStyle = COL.handInk; ctx.lineJoin = 'round'; ctx.stroke();
+        rr(-10, -49, 24, 8, 3); ctx.fillStyle = '#e8a93a'; ctx.fill(); ctx.stroke();
+      } else {
+        ctx.fillStyle = 'rgba(126,232,255,0.14)'; ctx.fill();
+        ctx.setLineDash([4, 3]); ctx.lineWidth = 2.4; ctx.strokeStyle = COL.ghost; ctx.lineJoin = 'round'; ctx.stroke();
+        rr(-10, -49, 24, 8, 3); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = COL.ghost; // 유령 얼굴
+        ctx.beginPath(); ctx.arc(-3, -31, 2.1, 0, Math.PI * 2); ctx.arc(6, -31, 2.1, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(1.5, -26, 2.6, 0.15 * Math.PI, 0.85 * Math.PI); ctx.lineWidth = 1.6; ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function zoneState(id) {
+      const S = core.state, b = S.blocks[id];
+      const inZ = b.u >= ROOMS[S.room].need[id] - 1e-9;
+      if (inZ && b.owner !== 'none') return 'on';
+      if (inZ) return 'unheld';
+      return 'off';
+    }
+
+    // ---- 화면 구성 ----
+    function drawBackground() {
+      ctx.fillStyle = COL.bg; ctx.fillRect(0, 0, CFG.W, CFG.H);
+      ctx.strokeStyle = COL.grid; ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let x = 12; x < CFG.W; x += 24) { ctx.moveTo(x, 92); ctx.lineTo(x, 556); }
+      for (let y = 104; y < 556; y += 24) { ctx.moveTo(0, y); ctx.lineTo(CFG.W, y); }
+      ctx.stroke();
+      ctx.fillStyle = COL.band; ctx.fillRect(0, 0, CFG.W, 92); ctx.fillRect(0, 556, CFG.W, 84);
+    }
+
+    function chip(x, y, w, h, text, state) {
+      const st = { on: [COL.ok, 'rgba(94,227,143,0.16)'], unheld: [COL.warn, 'rgba(255,181,71,0.14)'], off: ['#4a5072', '#22263c'] }[state];
+      rr(x, y, w, h, h / 2);
+      ctx.fillStyle = st[1]; ctx.fill();
+      ctx.lineWidth = 1.5; ctx.strokeStyle = st[0]; ctx.stroke();
+      fitFont(text, w - 12, 11.5, 800);
+      ctx.fillStyle = state === 'off' ? COL.muted : st[0];
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(text, x + w / 2, y + h / 2 + 0.5);
+    }
+
+    function drawMeter() {
+      const S = core.state;
+      const frac = Math.min(1, S.overlapSteps / CFG.OVERLAP_STEPS);
+      rr(12, 98, 336, 62, 12);
+      ctx.fillStyle = COL.panel; ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = frac > 0 ? COL.ok : COL.edge; ctx.stroke();
+      setFont(13, 800); ctx.fillStyle = COL.ink; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText(S.room === 1 ? '두 발판 동시 유지' : '스위치 + 목표 동시 유지', 24, 116);
+      setFont(15, 800); ctx.textAlign = 'right'; ctx.fillStyle = frac > 0 ? COL.ok : COL.muted;
+      ctx.fillText(`${(S.overlapSteps / CFG.SIM_HZ).toFixed(2)} / 1.00초`, 336, 117);
+      rr(24, 121, 312, 14, 7); ctx.fillStyle = '#2b3048'; ctx.fill();
+      if (frac > 0) { rr(24, 121, Math.max(14, 312 * frac), 14, 7); ctx.fillStyle = COL.ok; ctx.fill(); }
+      const za = zoneState('A'), zb = zoneState('B');
+      if (S.room === 1) {
+        chip(24, 141, 152, 16, za === 'on' ? 'A 발판 ✓ 켜짐' : za === 'unheld' ? 'A 발판: 잡아야 켜짐' : 'A 발판: 아직', za);
+        chip(184, 141, 152, 16, zb === 'on' ? 'B 발판 ✓ 켜짐' : zb === 'unheld' ? 'B 발판: 잡아야 켜짐' : 'B 발판: 아직', zb);
+      } else {
+        chip(24, 141, 152, 16, za === 'on' ? 'A 스위치 ✓ 문 열림' : za === 'unheld' ? 'A 스위치: 잡아야 켜짐' : 'A 스위치: 꺼짐', za);
+        chip(184, 141, 152, 16, zb === 'on' ? 'B 목표 ✓ 도착' : zb === 'unheld' ? 'B 목표: 잡아야 켜짐' : 'B 목표: 아직', zb);
+      }
+    }
+
+    // 메시지 표시(실시간 2.6초)
+    let shownSeq = 0, shownAt = 0, liveText = '';
+    function drawLines(now) {
+      const S = core.state, c = S.cand, g = S.ghost;
+      let t1, col1, bg1;
+      if (c) {
+        if (c.over) { t1 = '● 녹화 30초 초과 · 놓아도 기록하지 않아요'; col1 = COL.warn; }
+        else { t1 = `● 녹화 중 ${(c.steps / CFG.SIM_HZ).toFixed(1)}초 · 놓으면 ${g ? '이 동작으로 교체' : '유령이 이 동작을 반복'}`; col1 = COL.rec; }
+        bg1 = 'rgba(255,162,76,0.14)';
+      } else if (!g) {
+        t1 = '블록을 옮기고 놓으면 유령이 도와줘요'; col1 = COL.ghost; bg1 = 'rgba(126,232,255,0.10)';
+      } else if (S.room === 2) {
+        if (!S.gate.open) { t1 = '문 닫힘 · A를 잡고 스위치까지 올려야 열려요'; col1 = '#ff8a95'; bg1 = 'rgba(255,93,108,0.12)'; }
+        else if (S.gate.pending) { t1 = '닫힘 대기 · B가 문에 걸쳐 있어요'; col1 = COL.warn; bg1 = 'rgba(255,181,71,0.12)'; }
+        else { t1 = '문 열림 · A 스위치가 잡혀 있는 동안만'; col1 = COL.ok; bg1 = 'rgba(94,227,143,0.10)'; }
+      } else {
+        t1 = '유령이 잡는 동안 다른 블록을 직접 잡아요'; col1 = COL.muted; bg1 = 'rgba(255,255,255,0.05)';
+      }
+      pill(180, 175, t1, { color: col1, bg: bg1, size: 13 });
+      const m = S.msg;
+      if (m && m.seq !== shownSeq) { shownSeq = m.seq; shownAt = now; if (m.text !== liveText) { liveText = m.text; el.live.textContent = m.text; } }
+      if (m && now - shownAt < 2600) {
+        const k = { ok: COL.ok, warn: COL.warn, bad: COL.bad, ghost: COL.ghost, info: COL.muted }[m.kind] || COL.muted;
+        const a = Math.min(1, (2600 - (now - shownAt)) / 400);
+        ctx.save(); ctx.globalAlpha = a;
+        pill(180, 201, m.text, { color: k, bg: '#1d2135', edge: k, size: 12.5 });
+        ctx.restore();
+      }
+    }
+
+    function drawGroove(r) {
+      const a = { x: r.x0, y: r.y0 }, b = { x: r.x1, y: r.y1 };
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = COL.grooveEdge; ctx.lineWidth = 64; line(a, b);
+      ctx.strokeStyle = COL.groove; ctx.lineWidth = 59; line(a, b);
+      ctx.setLineDash([3, 9]); ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 2; line(a, b);
+      ctx.setLineDash([]);
+      // 홈(스프링 고정점)
+      const { dir, n } = railInfo(r);
+      const anc = add(a, dir, -30);
+      ctx.lineCap = 'round'; ctx.strokeStyle = '#59607f'; ctx.lineWidth = 6;
+      line(add(anc, n, -18), add(anc, n, 18));
+    }
+
+    function drawZone(id) {
+      const S = core.state, R = ROOMS[S.room], r = R.rails[id];
+      const p0 = posOf(r, R.need[id]), p1 = posOf(r, 1);
+      const st = zoneState(id);
+      const minX = Math.min(p0.x, p1.x), maxX = Math.max(p0.x, p1.x), minY = Math.min(p0.y, p1.y), maxY = Math.max(p0.y, p1.y);
+      const horizontal = Math.abs(r.x1 - r.x0) > Math.abs(r.y1 - r.y0);
+      const x = horizontal ? minX - 32 : minX - 35, y = horizontal ? minY - 35 : minY - 32;
+      const w = horizontal ? maxX - minX + 64 : 70, h = horizontal ? 70 : maxY - minY + 64;
+      rr(x, y, w, h, 14);
+      if (st === 'on') {
+        ctx.fillStyle = 'rgba(94,227,143,0.22)'; ctx.fill();
+        ctx.save(); ctx.shadowColor = COL.ok; ctx.shadowBlur = 16; ctx.lineWidth = 3.5; ctx.strokeStyle = COL.ok; ctx.stroke(); ctx.restore();
+      } else {
+        ctx.fillStyle = st === 'unheld' ? 'rgba(255,181,71,0.10)' : 'rgba(255,255,255,0.03)'; ctx.fill();
+        ctx.setLineDash([7, 5]); ctx.lineWidth = 2.5; ctx.strokeStyle = st === 'unheld' ? COL.warn : '#59607f'; ctx.stroke(); ctx.setLineDash([]);
+      }
+      const label = S.room === 1 ? '발판' : id === 'A' ? '스위치' : '목표';
+      const col = st === 'on' ? COL.ok : st === 'unheld' ? COL.warn : COL.muted;
+      setFont(11.5, 800); ctx.fillStyle = col; ctx.textBaseline = 'middle';
+      if (S.room === 1) {
+        ctx.textAlign = id === 'A' ? 'right' : 'left';
+        ctx.fillText(label, id === 'A' ? x - 5 : x + w + 5, (y + y + h) / 2);
+        ctx.fillText(id === 'A' ? 'A' : 'B', id === 'A' ? x - 5 : x + w + 5, (y + y + h) / 2 + 14);
+      } else if (id === 'A') {
+        ctx.textAlign = 'center'; ctx.fillText(label, 23, (y + y + h) / 2 - 7); ctx.fillText('A', 23, (y + y + h) / 2 + 8);
+      } else {
+        ctx.textAlign = 'center'; ctx.fillText(label + ' B', x + w / 2, y + h + 12);
+      }
+    }
+
+    function drawGateAndWire(now) {
+      const S = core.state, G = ROOMS[2].gate, gy = 410;
+      const want = core.isActive('A');
+      // 스위치 → 문 연결선
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.lineWidth = 4; ctx.setLineDash(want ? [] : [6, 6]);
+      ctx.strokeStyle = want ? COL.ok : '#4a5072';
+      ctx.beginPath(); ctx.moveTo(116, 300); ctx.lineTo(G.x, 300); ctx.lineTo(G.x, 372); ctx.stroke();
+      ctx.setLineDash([]);
+      setFont(10.5, 800); ctx.fillStyle = want ? COL.ok : COL.dim; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText('A 스위치 → 문', 177, 293);
+      // 문 기둥
+      ctx.fillStyle = '#59607f';
+      rr(G.x - 8, 368, 16, 7, 3); ctx.fill();
+      rr(G.x - 8, 445, 16, 7, 3); ctx.fill();
+      let label, col;
+      if (!S.gate.open) {
+        ctx.save();
+        if (S.blocks.B.gateStuck) { ctx.shadowColor = COL.bad; ctx.shadowBlur = 14; }
+        rr(G.x - 5, 375, 10, 70, 4); ctx.fillStyle = COL.bad; ctx.fill();
+        ctx.restore();
+        ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 2;
+        for (let y = 385; y < 445; y += 12) line({ x: G.x - 5, y }, { x: G.x + 5, y: y - 6 });
+        label = S.blocks.B.gateStuck ? '닫힘 · 막힘' : '닫힘'; col = COL.bad;
+      } else if (S.gate.pending) {
+        const blink = 0.55 + 0.45 * Math.sin(now / 120);
+        ctx.save(); ctx.globalAlpha = blink;
+        ctx.setLineDash([6, 4]); ctx.lineWidth = 3; ctx.strokeStyle = COL.warn;
+        rr(G.x - 5, 375, 10, 70, 4); ctx.stroke(); ctx.setLineDash([]);
+        ctx.restore();
+        label = '닫힘 대기'; col = COL.warn;
+      } else {
+        ctx.setLineDash([3, 5]); ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(94,227,143,0.55)';
+        rr(G.x - 5, 375, 10, 70, 4); ctx.stroke(); ctx.setLineDash([]);
+        label = '열림'; col = COL.ok;
+      }
+      pill(G.x, 470, `문 ${label}`, { color: col, bg: '#1d2135', edge: col, size: 11.5, maxW: 110 });
+    }
+
+    function drawSpring(id) {
+      const S = core.state, r = ROOMS[S.room].rails[id], b = S.blocks[id];
+      const { dir, n } = railInfo(r);
+      const a = add({ x: r.x0, y: r.y0 }, dir, -30), p = posOf(r, b.u);
+      const L = Math.hypot(p.x - a.x, p.y - a.y);
+      if (L < 32) return;
+      const coils = 9, amp = Math.max(4, Math.min(11, 360 / L + 3));
+      const s0 = 6, s1 = L - 22;
+      ctx.beginPath(); ctx.moveTo(a.x, a.y);
+      const pt0 = add(a, dir, s0); ctx.lineTo(pt0.x, pt0.y);
+      for (let i = 1; i <= coils * 2; i++) {
+        const k = s0 + (s1 - s0) * i / (coils * 2);
+        const q = add(add(a, dir, k), n, i === coils * 2 ? 0 : (i % 2 ? amp : -amp));
+        ctx.lineTo(q.x, q.y);
+      }
+      ctx.lineTo(p.x, p.y);
+      ctx.lineWidth = 3.5; ctx.lineJoin = 'round';
+      ctx.strokeStyle = b.owner === 'none' ? '#8a90b0' : '#d6d9ef';
+      ctx.stroke();
+    }
+
+    function drawPath(id, samples, curU, kind, labelOn) {
+      const S = core.state, r = ROOMS[S.room].rails[id];
+      const { n } = railInfo(r);
+      let minU = curU, maxU = curU;
+      for (const s of samples) { if (s.u < minU) minU = s.u; if (s.u > maxU) maxU = s.u; }
+      if (maxU - minU < 0.002) return;
+      const off = kind === 'ghost' ? 15 : -15;
+      const a = add(posOf(r, minU), n, off), b = add(posOf(r, maxU), n, off);
+      ctx.save();
+      ctx.lineCap = 'round';
+      if (kind === 'ghost') { ctx.setLineDash([1, 7]); ctx.lineWidth = 4.5; ctx.strokeStyle = COL.ghost; ctx.globalAlpha = labelOn ? 0.5 : 0.95; }
+      else { ctx.setLineDash([9, 6]); ctx.lineWidth = 3.5; ctx.strokeStyle = COL.rec; }
+      line(a, b);
+      ctx.setLineDash([]);
+      // 화살표: 기록 시작 → 기록 끝 방향
+      const u0 = samples[0].u, u1 = kind === 'ghost' ? samples[samples.length - 1].u : curU;
+      if (Math.abs(u1 - u0) > 0.02) {
+        const tip = add(posOf(r, u1), n, off), back = add(posOf(r, u1 - Math.sign(u1 - u0) * 0.06), n, off);
+        const d = { x: tip.x - back.x, y: tip.y - back.y }, L = Math.hypot(d.x, d.y) || 1;
+        const ux = d.x / L, uy = d.y / L;
+        ctx.fillStyle = ctx.strokeStyle;
+        ctx.beginPath();
+        ctx.moveTo(tip.x + ux * 4, tip.y + uy * 4);
+        ctx.lineTo(tip.x - ux * 7 - uy * 6, tip.y - uy * 7 + ux * 6);
+        ctx.lineTo(tip.x - ux * 7 + uy * 6, tip.y - uy * 7 - ux * 6);
+        ctx.closePath(); ctx.fill();
+      }
+      ctx.restore();
+      if (labelOn) {
+        const horizontal = Math.abs(n.y) > 0;
+        const k = kind === 'ghost' ? (horizontal ? 0.3 : 0.75) : 0;
+        // 세로 홈은 블록 반지름 밖에서 시작하도록 끝을 맞추고, 가로 홈은 위·아래로 비켜 둔다
+        const lp = add(posOf(r, minU + (maxU - minU) * k), n, horizontal ? (kind === 'ghost' ? 50 : -50) : (kind === 'ghost' ? 36 : -36));
+        const anchor = horizontal ? 'center' : kind === 'ghost' ? 'start' : 'end';
+        pill(lp.x, lp.y, kind === 'ghost' ? '교체될 경로' : '새 경로', { color: kind === 'ghost' ? COL.ghost : COL.rec, bg: 'rgba(21,23,38,0.85)', size: 10.5, maxW: 90, anchor });
+      }
+    }
+
+    function drawBlock(id, now) {
+      const S = core.state, r = ROOMS[S.room].rails[id], b = S.blocks[id];
+      const p = posOf(r, b.u);
+      const gi = core.ghostInfo();
+      // 그림자
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.beginPath(); ctx.arc(p.x + 2, p.y + 4, CFG.BLOCK_R, 0, Math.PI * 2); ctx.fill();
+      // 몸체
+      ctx.fillStyle = COL[id];
+      ctx.beginPath(); ctx.arc(p.x, p.y, CFG.BLOCK_R, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.22)';
+      ctx.beginPath(); ctx.arc(p.x - 7, p.y - 9, 13, 0, Math.PI * 2); ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+      ctx.beginPath(); ctx.arc(p.x, p.y, CFG.BLOCK_R, 0, Math.PI * 2); ctx.stroke();
+      setFont(22, 900); ctx.fillStyle = '#ffffff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(id, p.x, p.y + 1);
+      // 소유 표시
+      if (b.owner === 'manual') {
+        ctx.lineWidth = 4.5; ctx.strokeStyle = COL.hand;
+        ctx.beginPath(); ctx.arc(p.x, p.y, 33, 0, Math.PI * 2); ctx.stroke();
+      } else if (b.owner === 'ghost') {
+        ctx.setLineDash([5, 4]); ctx.lineWidth = 3; ctx.strokeStyle = COL.ghost;
+        ctx.beginPath(); ctx.arc(p.x, p.y, 33, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+        if (gi && gi.phase === 'hold' && !gi.blocked) {
+          ctx.lineWidth = 5; ctx.strokeStyle = COL.ghost; ctx.lineCap = 'round';
+          ctx.beginPath(); ctx.arc(p.x, p.y, 39, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (gi.remain / CFG.END_HOLD)); ctx.stroke();
+        }
+      } else if (b.u > 0.004) {
+        // 스프링 복귀 중 (또는 문에 막힘)
+        const { dir, n } = railInfo(r);
+        const q = add(p, n, 44);
+        if (b.gateStuck) {
+          pill(p.x, p.y - 44, '문에 막힘', { color: COL.bad, bg: '#1d2135', edge: COL.bad, size: 10.5, maxW: 80 });
+        } else {
+          ctx.strokeStyle = COL.muted; ctx.fillStyle = COL.muted; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+          const a1 = add(q, dir, 8), a2 = add(q, dir, -8);
+          line(a1, a2);
+          ctx.beginPath(); const h1 = add(add(a2, dir, 5), n, 5), h2 = add(add(a2, dir, 5), n, -5);
+          ctx.moveTo(h1.x, h1.y); ctx.lineTo(a2.x, a2.y); ctx.lineTo(h2.x, h2.y); ctx.stroke();
+          setFont(10, 800); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          const tp = add(q, n, Math.abs(n.x) ? 0 : -12);
+          ctx.fillText('복귀', tp.x + (Math.abs(n.x) ? 0 : 0), tp.y + (Math.abs(n.x) ? 16 : 0));
+        }
+      }
+    }
+
+    function drawHandAndPill(id, now) {
+      const S = core.state, r = ROOMS[S.room].rails[id], b = S.blocks[id];
+      if (b.owner === 'none') return;
+      const p = posOf(r, b.u);
+      const tipY = p.y - 30;
+      // 두 블록의 표시가 겹치지 않도록 각 홈의 바깥쪽(방1: A 왼쪽·B 오른쪽)에 둔다
+      const side = S.room === 1 ? (id === 'A' ? 'end' : 'start') : (p.x + 21 + 84 <= CFG.W - 4 ? 'start' : 'end');
+      const px = side === 'start' ? p.x + 21 : p.x - 21, py = p.y - 62;
+      const maxW = side === 'end' ? Math.min(84, px - 4) : Math.min(84, CFG.W - 4 - px);
+      let txt, col, o;
+      if (b.owner === 'manual') {
+        drawHand(p.x, tipY, 'manual');
+        txt = !S.cand ? '내 손' : S.cand.over ? '30초 초과' : `녹화 ${(S.cand.steps / CFG.SIM_HZ).toFixed(1)}초`;
+        o = { color: '#1a1406', bg: !S.cand ? COL.hand : S.cand.over ? COL.warn : COL.rec };
+      } else {
+        const gi = core.ghostInfo();
+        drawHand(p.x, tipY + Math.sin(now / 260) * 1.5, 'ghost');
+        col = COL.ghost;
+        if (!gi) txt = '유령';
+        else if (gi.blocked) { txt = '유령 막힘'; col = COL.bad; }
+        else if (gi.phase === 'hold') txt = `유령 ${gi.remain.toFixed(1)}초`;
+        else if (gi.phase === 'reverse') txt = '유령 되감기';
+        else txt = '유령 재생';
+        o = { color: col, bg: '#1d2135', edge: col };
+      }
+      pill(px, py, txt, Object.assign(o, { anchor: side, size: 12.5, maxW }));
+    }
+
+    function drawRoom(now) {
+      const S = core.state, R = ROOMS[S.room];
+      for (const id of IDS) drawGroove(R.rails[id]);
+      for (const id of IDS) drawZone(id);
+      if (R.gate) drawGateAndWire(now);
+      for (const id of IDS) drawSpring(id);
+      if (S.ghost) drawPath(S.ghost.block, S.ghost.samples, S.ghost.endU, 'ghost', !!S.cand);
+      if (S.cand) drawPath(S.cand.block, S.cand.samples, S.blocks[S.cand.block].u, 'cand', !!S.ghost);
+      for (const id of IDS) drawBlock(id, now);
+      for (const id of IDS) drawHandAndPill(id, now);
+    }
+
+    // ---- HTML 상태 ----
+    const cache = {};
+    function setText(node, key, text) { if (cache[key] !== text) { cache[key] = text; node.textContent = text; } }
+    function setHidden(node, key, hidden) { if (cache[key] !== hidden) { cache[key] = hidden; node.hidden = hidden; } }
+    function setClass(node, key, cls) { if (cache[key] !== cls) { cache[key] = cls; node.className = cls; } }
+    function ghostLabel() {
+      const gi = core.ghostInfo();
+      if (!gi) return ['유령 손: 없음 · 마지막 드래그를 유령이 반복해요', 'none'];
+      if (gi.blocked) return [`유령 손: ${gi.block} 옮기다 닫힌 문에 막혀 멈춤`, 'blocked'];
+      if (gi.phase === 'hold') return [`유령 손: ${gi.block} 끝에서 유지 · ${gi.remain.toFixed(1)}초 남음`, ''];
+      if (gi.phase === 'reverse') return [`유령 손: ${gi.block} 동작 되감는 중`, ''];
+      return [`유령 손: ${gi.block} 동작 다시 재생 중`, ''];
+    }
+    function updateHtml() {
+      const S = core.state;
+      setText(el.roomTag, 'room', `방 ${S.room} / 2`);
+      setText(el.clearTag, 'clear', `완료 ${core.cleared()} / 2`);
+      setClass(el.clearTag, 'clearCls', core.cleared() > 0 ? 'tag done' : 'tag');
+      setText(el.goal, 'goal', S.room === 1 ? '두 블록을 잡은 채 위 발판에 동시에 1초' : 'A 스위치로 문 열고 · B를 잡은 채 목표에 1초');
+      const [gt, gc] = ghostLabel();
+      setText(el.ghostText, 'ghost', gt);
+      setClass(el.ghostLine, 'ghostCls', gc);
+      // 성공·완료
+      const done = S.scene !== 'playing';
+      setHidden(el.panel, 'panel', !done);
+      if (S.scene === 'success') {
+        setText(el.panelTitle, 'pt', `방 ${S.room} 해결!`);
+        setText(el.panelText, 'pp', S.room === 1
+          ? '유령 손과 내 손이 두 발판을 함께 1초 눌렀어요.'
+          : '스위치와 목표를 함께 1초 유지했어요.');
+      } else if (S.scene === 'complete') {
+        setText(el.panelTitle, 'pt', '전체 완료!');
+        setText(el.panelText, 'pp', '두 방을 모두 해결했어요. 과거의 나와 협동 성공!');
+      }
+      setText(el.restart, 'rs', S.scene === 'complete' ? '처음부터 다시 하기' : '다시 하기');
+      setClass(el.restart, 'rsc', S.scene === 'complete' ? 'big' : 'big sec');
+      setHidden(el.next, 'nx', !(S.scene === 'success' && S.room === 1));
+      // 일시정지
+      setHidden(el.pause, 'pause', !S.paused);
+      if (S.paused) {
+        setText(el.pauseNote, 'pn', S.pauseNote || '진행 중이던 드래그는 없었어요.');
+        setText(el.pauseGhost, 'pg', ghostLabel()[0]);
+      }
+    }
+
+    function render() {
+      const now = performance.now();
+      ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+      drawBackground();
+      drawMeter();
+      drawLines(now);
+      drawRoom(now);
+      updateHtml();
+    }
+
+    function frame() {
+      pump();
+      render();
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+    return core;
+  }
+
+  const api = { createCore, selfTest, CFG, ROOMS };
+  if (typeof window !== 'undefined') window.FingerCopier = api;
+  if (typeof document !== 'undefined' && document.getElementById('cv')) {
+    api.game = startShell();
+    if (/[?&]selftest\b/.test(location.search)) {
+      const r = selfTest();
+      const badge = document.createElement('div');
+      badge.id = 'selftest';
+      badge.textContent = `자가검사 ${r.pass}/${r.pass + r.fail} 통과 · 자세한 결과는 콘솔`;
+      document.body.appendChild(badge);
+      setTimeout(() => badge.remove(), 8000); // 버튼을 오래 가리지 않게
+    }
+  }
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+})();
+</script>
+</body>
+</html>
